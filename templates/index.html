@@ -57,6 +57,12 @@
         <span>Scanned look<small>Paper grain, light shading and a slight tilt.</small></span></label>
       <label class="toggle"><input type="checkbox" id="mistakes"><span class="switch"></span>
         <span>Occasional mistakes<small>Now and then a word is crossed out and rewritten.</small></span></label>
+      <p class="sub">Page shadow</p>
+      <div class="chips" id="shadows" role="group" aria-label="Page shadow"></div>
+      <div class="slider" id="shadowAmtRow" hidden>
+        <label for="shadowAmt">Shadow strength</label><output id="shadowAmtOut" for="shadowAmt"></output>
+        <input type="range" id="shadowAmt" min="10" max="100" step="1">
+      </div>
     </div>
   </section>
 
@@ -64,7 +70,7 @@
     <div class="bar">
       <span class="count" id="count">Preparing preview…</span>
       <button class="btn" id="shuffle" type="button">Shuffle variation</button>
-      <button class="btn primary" id="pdf" type="button">Download PDF</button>
+      <button class="btn primary" id="pdf" type="button" data-pdf>Download PDF</button>
     </div>
     <p class="status" id="status" role="status" aria-live="polite"></p>
     <div class="pages" id="pages"></div>
@@ -75,7 +81,7 @@
   <div>
     <h2>How it works</h2>
     <p>Type or paste your text, pick a handwriting style, ink and paper, and the preview updates as you type. Every letter is drawn with small differences in angle, size and ink, and each line drifts slightly, so the page doesn’t look printed.</p>
-    <p>When it looks right, download the whole thing as a PDF or save any page as an image. Long text flows onto as many pages as it needs.</p>
+    <p>When it looks right, download every page together as one PDF or save any page as an image. Long text flows onto as many pages as it needs, and a page shadow along the edge or spine makes it look like a photo of a real notebook.</p>
   </div>
   <div>
     <h2>Use your own handwriting</h2>
