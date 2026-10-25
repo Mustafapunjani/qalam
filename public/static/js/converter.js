@@ -24,6 +24,12 @@ const INKS = {
   red:   {name:"Red",    c:"#b3261e", a:.95},
   pencil:{name:"Pencil", c:"#46474d", a:.8, pencil:true}
 };
+const SHADOWS = {
+  off:  {name:"Off"},
+  left: {name:"Left edge"},
+  right:{name:"Right edge"},
+  book: {name:"Book spine"}   // alternates sides page by page, like an open notebook
+};
 const W = 1240, H = 1754, REF_GAP = 46; // A4 at 150 dpi
 const PAPERS = {
   notebook:{name:"Notebook",      gap:46, top:214, left:172, right:1168, bottom:1680, dateY:150},
@@ -47,7 +53,7 @@ const DEFAULTS = {
   date:today(),
   text:"This page was typed, not written. Pick a handwriting style, change the ink and the paper, and turn on the scanned look to see how real it can get.\n\nEvery letter is drawn a little differently, each line drifts slightly, and the ink is never perfectly even, just like a real pen on real paper.\n\nPress “Shuffle variation” to get a fresh version of the same page.",
   font:"caveat", size:100, spacing:0, ink:"blue", paper:"notebook",
-  vari:55, drift:40, scan:true, mistakes:false, seed:20261025
+  vari:55, drift:40, scan:true, mistakes:false, shadow:"off", shadowAmt:55, seed:20261025
 };
 const KEY = "qalam-settings-v1";
 let state = Object.assign({}, DEFAULTS);
@@ -359,6 +365,47 @@ function scanify(pc, scale, r){
   return out;
 }
 
+/* Side shadow: the dark band a page gets near the spine or along one edge when it's photographed.
+   Drawn as a per-pixel mask so it falls off smoothly and its width wanders a little down the page. */
+function shadowSide(mode, idx){
+  if(mode === "left" || mode === "right") return mode;
+  if(mode === "book") return idx % 2 ? "right" : "left";
+  return null;
+}
+function sideShadow(cv, side, amount, seed){
+  const w = cv.width, h = cv.height, s = Math.max(0, Math.min(1, amount/100));
+  if(!s) return cv;
+  const r = rngFrom(seed);
+  const base = w*(0.10 + 0.10*s);                       // shadow reach, as a share of page width
+  const tilt = (r()-.5)*0.35, bulge = 0.08 + r()*0.16, ph = r()*6.283, wob = 0.03 + r()*0.03;
+  const maxD = Math.ceil(base*(1 + Math.abs(tilt) + bulge + wob) + 2);
+  const mw = Math.min(w, maxD), mask = mk(mw, h), mg = mask.getContext("2d");
+  const im = mg.createImageData(mw, h), d = im.data;
+  for(let y=0; y<h; y++){
+    const t = y/h;
+    const reach = base*(1 + tilt*(2*t-1) + bulge*(Math.sin(Math.PI*t) - .5) + wob*Math.sin(t*11 + ph));
+    for(let x=0; x<mw; x++){
+      const u = x/reach;
+      if(u >= 1) break;
+      const a = s*(0.62*Math.exp(-u*8.5) + 0.2*(1-u)*(1-u));
+      const j = (y*mw + x)*4;
+      d[j] = 30; d[j+1] = 24; d[j+2] = 16; d[j+3] = Math.min(255, a*255);
+    }
+  }
+  mg.putImageData(im, 0, 0);
+  const o = cv.getContext("2d");
+  o.save();
+  if(side === "right"){ o.translate(w, 0); o.scale(-1, 1); }
+  o.globalCompositeOperation = "multiply";
+  o.drawImage(mask, 0, 0);
+  // light falls off a little towards the far edge too
+  const far = o.createLinearGradient(w, 0, w*0.9, 0);
+  far.addColorStop(0, "rgba(30,24,16,"+(0.07*s).toFixed(3)+")"); far.addColorStop(1, "rgba(30,24,16,0)");
+  o.fillStyle = far; o.fillRect(w*0.9, 0, w*0.1, h);
+  o.restore();
+  return cv;
+}
+
 function drawPage(pg, idx, env, r){
   const {st, scale, paper, paperKey, fs, ink, vari, drift, measureW, spaceW} = env;
   const cw = Math.round(W*scale), chh = Math.round(H*scale);
@@ -399,7 +446,10 @@ function drawPage(pg, idx, env, r){
 
   p.setTransform(1,0,0,1,0,0);
   p.globalCompositeOperation = "multiply"; p.drawImage(ic,0,0); p.globalCompositeOperation = "source-over";
-  return st.scan ? scanify(pc, scale, r) : pc;
+  const out = st.scan ? scanify(pc, scale, r) : pc;
+  const side = shadowSide(st.shadow, idx);
+  // own random stream, so turning the shadow on or off doesn't reshuffle the letters
+  return side ? sideShadow(out, side, st.shadowAmt, ((st.seed|0) ^ 0x3c6ef372) + idx*7919) : out;
 }
 
 function buildPages(st, scale){
@@ -413,6 +463,7 @@ function buildPages(st, scale){
 /* ---------- UI ---------- */
 const $ = id=>document.getElementById(id);
 const pagesEl = $("pages"), countEl = $("count"), statusEl = $("status"), pdfBtn = $("pdf");
+let pageCount = 0;
 
 function setStatus(msg){ statusEl.textContent = msg || ""; }
 
@@ -461,12 +512,15 @@ function syncPressed(){
   document.querySelectorAll("#fonts .font-tile").forEach(b=>b.setAttribute("aria-pressed", String(b.dataset.id===state.font)));
   document.querySelectorAll("#inks .chip").forEach(b=>b.setAttribute("aria-pressed", String(b.dataset.k===state.ink)));
   document.querySelectorAll("#papers .chip").forEach(b=>b.setAttribute("aria-pressed", String(b.dataset.k===state.paper)));
+  document.querySelectorAll("#shadows .chip").forEach(b=>b.setAttribute("aria-pressed", String(b.dataset.k===state.shadow)));
+  $("shadowAmtRow").hidden = !SHADOWS[state.shadow] || state.shadow === "off";
 }
 const OUTS = {
   size: v=>v+"%",
   spacing: v=> (v>0?"+":"")+v,
   vari: v=> v<15 ? "Steady" : v<45 ? "Light" : v<75 ? "Natural" : "Messy",
-  drift: v=> v<15 ? "Straight" : v<50 ? "Slight" : v<80 ? "Noticeable" : "Wavy"
+  drift: v=> v<15 ? "Straight" : v<50 ? "Slight" : v<80 ? "Noticeable" : "Wavy",
+  shadowAmt: v=> v<30 ? "Soft" : v<70 ? "Medium" : "Deep"
 };
 function bindInputs(){
   for(const k of ["heading","date","text"]){
@@ -512,8 +566,19 @@ async function render(){
     cap.append(b);
     fig.append(cv, cap); pagesEl.append(fig);
   });
-  countEl.textContent = canvases.length === 1 ? "1 page" : canvases.length+" pages";
+  pageCount = canvases.length;
+  countEl.textContent = pageCount === 1 ? "1 page" : pageCount+" pages";
+  pdfBtn.textContent = pdfLabel();
+  if(pageCount > 1){
+    // a second download button under the last page, so nobody has to scroll back up
+    const end = document.createElement("div"); end.className = "pages-end";
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn primary"; b.dataset.pdf = "";
+    b.textContent = "Download all "+pageCount+" pages as one PDF";
+    b.addEventListener("click", savePdf);
+    end.append(b); pagesEl.append(end);
+  }
 }
+function pdfLabel(){ return pageCount > 1 ? "Download all "+pageCount+" pages (PDF)" : "Download PDF"; }
 
 function saveBlob(blob, filename){
   const url = URL.createObjectURL(blob), a = document.createElement("a");
@@ -527,22 +592,32 @@ async function savePng(i){
     await ensureFont();
     const cv = buildPages(state, 1.6)[i];
     const blob = await new Promise(res=>cv.toBlob(res,"image/png"));
-    saveBlob(blob, "handwriting-page-"+(i+1)+".png");
+    saveBlob(blob, fileBase()+"-page-"+(i+1)+".png");
     setStatus("");
   }catch(e){ saveError(e); }
 }
+function fileBase(){
+  const h = (state.heading||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,50);
+  return h || "handwriting";
+}
+const nextFrame = ()=> new Promise(res=>setTimeout(res, 0));
 async function savePdf(){
   if(!window.jspdf){ setStatus("The PDF tool didn’t load. Reload the page and try again."); return; }
-  pdfBtn.disabled = true; setStatus("Preparing your PDF…");
+  const btns = document.querySelectorAll("[data-pdf]");
+  btns.forEach(b=>b.disabled = true); setStatus("Preparing your PDF…");
   try{
     await ensureFont();
     const pages = buildPages(state, 1.6);
     const doc = new window.jspdf.jsPDF({unit:"mm", format:"a4", compress:true});
-    pages.forEach((cv,i)=>{ if(i) doc.addPage(); doc.addImage(cv.toDataURL("image/jpeg",0.9),"JPEG",0,0,210,297); });
-    saveBlob(doc.output("blob"), "handwriting.pdf");
-    setStatus("");
+    for(let i=0; i<pages.length; i++){
+      if(pages.length > 1){ setStatus("Adding page "+(i+1)+" of "+pages.length+"…"); await nextFrame(); }
+      if(i) doc.addPage();
+      doc.addImage(pages[i].toDataURL("image/jpeg",0.9),"JPEG",0,0,210,297);
+    }
+    saveBlob(doc.output("blob"), fileBase()+".pdf");
+    setStatus(pages.length > 1 ? "Saved all "+pages.length+" pages in one PDF." : "");
   }catch(e){ saveError(e); }
-  finally{ pdfBtn.disabled = false; }
+  finally{ btns.forEach(b=>b.disabled = false); }
 }
 
 $("shuffle").addEventListener("click", ()=>{ state.seed = Math.floor(Math.random()*2147483647); changed(); });
@@ -551,6 +626,8 @@ pdfBtn.addEventListener("click", savePdf);
 buildFontTiles();
 buildChips("inks", INKS, "ink", true);
 buildChips("papers", PAPERS, "paper", false);
+buildChips("shadows", SHADOWS, "shadow", false);
+syncPressed();
 bindInputs();
 $("fontFile").addEventListener("change", async e=>{
   const f = e.target.files && e.target.files[0]; e.target.value = "";
