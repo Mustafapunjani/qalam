@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "app.py": {
+      "excludeFiles": "{tests/**,tools/**,public/**,**/__pycache__/**,fontmaker.py,render.yaml}"
+    }
+  }
+}
