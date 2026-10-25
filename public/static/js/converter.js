@@ -74,6 +74,7 @@ function makeNoise(mode){
   g.putImageData(im,0,0); return cv;
 }
 const NOISE_A = makeNoise("a"), NOISE_G = makeNoise("g");
+const CAN_FILTER = (()=>{ try{ const g = mk(1,1).getContext("2d"); g.filter = "blur(1px)"; return g.filter === "blur(1px)"; }catch(e){ return false; } })();
 const mctx = mk(4,4).getContext("2d");
 let mcache = new Map();
 /* ---------- Uploaded font ---------- */
@@ -175,7 +176,7 @@ function makeEnv(st, scale){
   const ls = st.spacing*fs*0.01;
   const measure = (t,size)=>{
     if(!t) return 0;
-    const k = size+"|"+t; let v = mcache.get(k);
+    const k = font.family+"|"+size+"|"+t; let v = mcache.get(k);
     if(v===undefined){ mctx.font = size+'px "'+font.family+'"'; v = mctx.measureText(t).width; if(mcache.size>20000) mcache.clear(); mcache.set(k,v); }
     return v;
   };
@@ -412,7 +413,6 @@ function drawPage(pg, idx, env, r){
   const pc = mk(cw,chh), p = pc.getContext("2d"); p.scale(scale,scale); drawPaper(p, env);
   const ic = mk(cw,chh), c = ic.getContext("2d"); c.scale(scale,scale);
   c.fillStyle = ink.c; c.strokeStyle = ink.c; c.lineCap = "round"; c.lineJoin = "round"; c.textBaseline = "alphabetic";
-  if(!ink.pencil){ c.shadowColor = rgba(ink.c,.4); c.shadowBlur = 1.1*scale; }
 
   const date = (st.date||"").trim();
   if(idx===0 && date){
@@ -437,8 +437,15 @@ function drawPage(pg, idx, env, r){
     }
     if(line.heading) underline(c, x0-8, last+10, base, line.size, env, r);
   }
-  c.shadowBlur = 0; c.shadowColor = "transparent";
   c.setTransform(1,0,0,1,0,0);
+  if(!ink.pencil && CAN_FILTER){
+    // ink bleeds slightly into the paper: one blurred copy of the whole layer behind the letters.
+    // Same look as a canvas shadow on each letter, but done once per page instead of once per letter.
+    const soft = mk(cw,chh), sg = soft.getContext("2d");
+    sg.filter = "blur("+(0.55*scale).toFixed(2)+"px)"; sg.drawImage(ic,0,0); sg.filter = "none";
+    c.globalCompositeOperation = "destination-over"; c.globalAlpha = .4; c.drawImage(soft,0,0);
+    c.globalAlpha = 1; c.globalCompositeOperation = "source-over";
+  }
   c.globalCompositeOperation = "destination-out";
   c.globalAlpha = ink.pencil ? .5 : .16;
   c.fillStyle = c.createPattern(NOISE_A,"repeat"); c.fillRect(0,0,cw,chh);
@@ -453,7 +460,6 @@ function drawPage(pg, idx, env, r){
 }
 
 function buildPages(st, scale){
-  mcache = new Map();
   const env = makeEnv(st, scale);
   const pages = layout(env);
   const r = rngFrom(st.seed);
@@ -477,7 +483,7 @@ function buildFontTiles(){
     const s = document.createElement("span"); s.className = "s"; s.style.fontFamily = '"'+f.family+'", cursive'; s.textContent = "Hello";
     const n = document.createElement("span"); n.className = "n"; n.textContent = f.name;
     b.append(s,n);
-    b.addEventListener("click", ()=>{ state.font = f.id; changed(); syncPressed(); });
+    b.addEventListener("click", ()=>{ state.font = f.id; changed(true); syncPressed(); });
     box.append(b);
   }
   const up = document.createElement("button");
@@ -504,7 +510,7 @@ function buildChips(boxId, map, key, withDot){
     b.setAttribute("aria-pressed", String(state[key]===k));
     if(withDot){ const d = document.createElement("span"); d.className = "dot"; d.style.background = map[k].c; if(map[k].pencil) d.style.background = "repeating-linear-gradient(45deg,#6b6c72 0 2px,#9a9ba1 2px 4px)"; b.append(d); }
     b.append(document.createTextNode(map[k].name));
-    b.addEventListener("click", ()=>{ state[key] = k; changed(); syncPressed(); });
+    b.addEventListener("click", ()=>{ state[key] = k; changed(true); syncPressed(); });
     box.append(b);
   }
 }
@@ -533,12 +539,13 @@ function bindInputs(){
   }
   for(const k of ["scan","mistakes"]){
     const el = $(k); el.checked = !!state[k];
-    el.addEventListener("change", ()=>{ state[k] = el.checked; changed(); });
+    el.addEventListener("change", ()=>{ state[k] = el.checked; changed(true); });
   }
 }
 
 let timer = 0, token = 0;
-function changed(){ persist(); clearTimeout(timer); timer = setTimeout(render, 180); }
+// fast = a click (font, ink, paper…): redraw straight away. Typing waits a moment so every key doesn't redraw.
+function changed(fast){ persist(); clearTimeout(timer); timer = setTimeout(render, fast ? 0 : 180); }
 
 async function ensureFont(){
   const f = getFont();
@@ -546,36 +553,59 @@ async function ensureFont(){
   try{ await document.fonts.load('40px "'+f.family+'"', sample); }catch(e){}
 }
 
+// The preview only needs as many pixels as the screen shows; downloads still use full quality.
+function previewScale(){
+  const cssW = Math.min(760, pagesEl.clientWidth || 760), dpr = window.devicePixelRatio || 1;
+  return Math.round(Math.max(0.45, Math.min(1, cssW*dpr/W))*100)/100;
+}
+const yieldToBrowser = ()=> new Promise(res=>requestAnimationFrame(()=>setTimeout(res,0)));
+let endEl = null;
+
+function pageFigure(i){
+  let fig = pagesEl.children[i];
+  if(fig && fig.classList.contains("page")) return fig;
+  fig = document.createElement("figure"); fig.className = "page";
+  const cap = document.createElement("figcaption");
+  const lab = document.createElement("span"); lab.textContent = "Page "+(i+1);
+  const b = document.createElement("button"); b.type = "button"; b.className = "linkbtn"; b.textContent = "Save as image";
+  b.addEventListener("click", ()=>savePng(i));
+  cap.append(lab, b); fig.append(cap);
+  pagesEl.insertBefore(fig, pagesEl.children[i] || null);
+  return fig;
+}
+
 async function render(){
   const t = ++token;
   await ensureFont();
   if(t !== token) return;
-  let canvases;
-  try{ canvases = buildPages(state, 1); }
+  let env, pages;
+  try{ env = makeEnv(state, previewScale()); pages = layout(env); }
   catch(e){ setStatus("The preview couldn’t be drawn. Try a different handwriting style."); return; }
-  if(t !== token) return;
-  pagesEl.textContent = "";
-  canvases.forEach((cv,i)=>{
-    const fig = document.createElement("figure"); fig.className = "page";
-    cv.setAttribute("role","img"); cv.setAttribute("aria-label","Handwritten page "+(i+1)+" of "+canvases.length);
-    const cap = document.createElement("figcaption");
-    const lab = document.createElement("span"); lab.textContent = "Page "+(i+1);
-    cap.append(lab);
-    const b = document.createElement("button"); b.type = "button"; b.className = "linkbtn"; b.textContent = "Save as image";
-    b.addEventListener("click", ()=>savePng(i));
-    cap.append(b);
-    fig.append(cv, cap); pagesEl.append(fig);
-  });
-  pageCount = canvases.length;
-  countEl.textContent = pageCount === 1 ? "1 page" : pageCount+" pages";
+  const r = rngFrom(state.seed), n = pages.length;
+  if(endEl) endEl.remove();
+  // Draw page by page and show each one as soon as it's ready, so the first page updates
+  // almost instantly even for long text. A newer change cancels the rest.
+  for(let i=0; i<n; i++){
+    let cv;
+    try{ cv = drawPage(pages[i], i, env, r); }
+    catch(e){ setStatus("The preview couldn’t be drawn. Try a different handwriting style."); return; }
+    if(t !== token) return;
+    cv.setAttribute("role","img"); cv.setAttribute("aria-label","Handwritten page "+(i+1)+" of "+n);
+    const fig = pageFigure(i), old = fig.querySelector("canvas");
+    if(old) old.replaceWith(cv); else fig.prepend(cv);
+    if(i < n-1){ await yieldToBrowser(); if(t !== token) return; }
+  }
+  while(pagesEl.children.length > n) pagesEl.lastElementChild.remove();
+  pageCount = n;
+  countEl.textContent = n === 1 ? "1 page" : n+" pages";
   pdfBtn.textContent = pdfLabel();
-  if(pageCount > 1){
+  if(n > 1){
     // a second download button under the last page, so nobody has to scroll back up
-    const end = document.createElement("div"); end.className = "pages-end";
+    endEl = document.createElement("div"); endEl.className = "pages-end";
     const b = document.createElement("button"); b.type = "button"; b.className = "btn primary"; b.dataset.pdf = "";
-    b.textContent = "Download all "+pageCount+" pages as one PDF";
+    b.textContent = "Download all "+n+" pages as one PDF";
     b.addEventListener("click", savePdf);
-    end.append(b); pagesEl.append(end);
+    endEl.append(b); pagesEl.append(endEl);
   }
 }
 function pdfLabel(){ return pageCount > 1 ? "Download all "+pageCount+" pages (PDF)" : "Download PDF"; }
@@ -620,7 +650,7 @@ async function savePdf(){
   finally{ btns.forEach(b=>b.disabled = false); }
 }
 
-$("shuffle").addEventListener("click", ()=>{ state.seed = Math.floor(Math.random()*2147483647); changed(); });
+$("shuffle").addEventListener("click", ()=>{ state.seed = Math.floor(Math.random()*2147483647); changed(true); });
 pdfBtn.addEventListener("click", savePdf);
 
 buildFontTiles();
