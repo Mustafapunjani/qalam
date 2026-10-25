@@ -1,0 +1,6 @@
+{% extends "page.html" %}
+{% block title %}Page not found | {{ site_name }}{% endblock %}
+{% block body %}
+<h1>This page doesn’t exist</h1>
+<p>The link may be old or mistyped. <a href="{{ url_for('index') }}">Go to the converter</a> or <a href="{{ url_for('make_font') }}">make your handwriting font</a>.</p>
+{% endblock %}

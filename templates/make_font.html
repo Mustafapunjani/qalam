@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Make a font from your handwriting, free | {{ site_name }}{% endblock %}
+{% block description %}Print a template, write the alphabet with a pen, upload a photo and get a real font of your own handwriting. Works in Word, browsers and our converter.{% endblock %}
+{% block content %}
+<main class="maker">
+  <h1>Make a font from your handwriting</h1>
+  <p class="intro">It takes one printout, a pen and your phone camera. Your photos are used only to build the font and aren’t kept.</p>
+
+  <ol class="steps">
+    <li>
+      <h2>Print the template</h2>
+      <p class="muted">Two A4 pages. Print at 100% size, not “fit to page”.</p>
+      <a class="btn" href="{{ url_for('template_pdf') }}" download>Download template (PDF)</a>
+    </li>
+    <li>
+      <h2>Fill it in</h2>
+      <p class="muted">Use a dark pen and write one character in each box, sitting on the solid line. Small letters are written three times and capitals twice, so your text won’t repeat the exact same shape.</p>
+    </li>
+    <li>
+      <h2>Upload a photo or scan of each page</h2>
+      <form id="form">
+        <label class="field"><span>Font name</span><input type="text" name="name" value="My Handwriting" maxlength="48"></label>
+        <label class="drop" id="drop">
+          <input type="file" name="pages" id="pages" accept="image/*" multiple>
+          <strong>Choose photos</strong> <span class="muted">or drop them here</span>
+          <div class="files" id="files">Both pages, in any order. Keep all four black squares in each photo.</div>
+        </label>
+        <div class="actions"><button class="btn primary" id="go" type="submit">Make my font</button></div>
+        <div class="form-status" id="status" role="status" aria-live="polite"></div>
+      </form>
+    </li>
+  </ol>
+
+  <section class="result" id="result" hidden>
+    <h2>Your font is ready</h2>
+    <img id="preview" alt="Sample text written in your new font">
+    <ul class="notes" id="notes"></ul>
+    <div class="actions">
+      <button class="btn primary" id="use" type="button">Write pages with it</button>
+      <a class="btn" id="download" download>Download font (.ttf)</a>
+    </div>
+    <label class="field"><span>Try it: type anything</span>
+      <textarea class="try" id="try">Hello, this is my handwriting.</textarea></label>
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}
+<script>window.QALAM = {api: "{{ url_for('api_font') }}", converter: "{{ url_for('index') }}"};</script>
+<script src="{{ url_for('static', filename='js/make-font.js') }}"></script>
+{% endblock %}

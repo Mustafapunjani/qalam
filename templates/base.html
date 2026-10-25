@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}{{ site_name }}{% endblock %}</title>
+<meta name="description" content="{% block description %}Turn typed text into realistic handwriting, or make a font from your own handwriting. Free, no sign-up.{% endblock %}">
+<link rel="canonical" href="{{ request.base_url }}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{{ site_name }}">
+<meta property="og:title" content="{{ self.title() }}">
+<meta property="og:description" content="{{ self.description() }}">
+<meta property="og:url" content="{{ request.base_url }}">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✍️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Caveat&display=swap" rel="stylesheet">{% endblock %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/site.css') }}">
+{% block head %}{% endblock %}
+</head>
+<body>
+<header class="site-head">
+  <a class="logo" href="{{ url_for('index') }}">{{ site_name }}</a>
+  <nav aria-label="Main">
+    <a href="{{ url_for('index') }}" {% if request.endpoint == 'index' %}aria-current="page"{% endif %}>Converter</a>
+    <a href="{{ url_for('make_font') }}" {% if request.endpoint == 'make_font' %}aria-current="page"{% endif %}>Make your font</a>
+    <a href="{{ url_for('about') }}" {% if request.endpoint == 'about' %}aria-current="page"{% endif %}>About</a>
+  </nav>
+</header>
+{% block content %}{% endblock %}
+<footer class="site-foot">
+  <div class="in">
+    <a href="{{ url_for('about') }}">About</a>
+    <a href="{{ url_for('privacy') }}">Privacy</a>
+    <a href="{{ url_for('terms') }}">Terms</a>
+    <a href="{{ url_for('contact') }}">Contact</a>
+    <span class="copy">© {{ year }} {{ site_name }}</span>
+  </div>
+</footer>
+{% block scripts %}{% endblock %}
+</body>
+</html>

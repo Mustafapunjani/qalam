@@ -1,0 +1,18 @@
+{% extends "page.html" %}
+{% block title %}About | {{ site_name }}{% endblock %}
+{% block description %}{{ site_name }} turns typed text into realistic handwriting and makes fonts from your own handwriting.{% endblock %}
+{% block body %}
+<h1>About {{ site_name }}</h1>
+<p>{{ site_name }} (Urdu for “pen”) turns typed text into pages that look handwritten. You can use one of our handwriting styles, upload any font, or make a font from your own handwriting with a printed template and a photo.</p>
+<h2>What people use it for</h2>
+<ul>
+  <li>Notes, study sheets and flashcards that are easier to read than a messy scrawl</li>
+  <li>Cards, letters and invitations with a personal touch</li>
+  <li>Journals, scrapbooks, social media posts and other creative work</li>
+  <li>Writing by hand when it’s painful or slow, for example because of an injury or a condition like dysgraphia</li>
+</ul>
+<h2>Please use it honestly</h2>
+<p>If a teacher, exam or form asks for your own handwriting, they mean writing done by your hand. Don’t hand in a generated page in its place, and don’t use someone else’s handwriting font to pass off writing as theirs.</p>
+<h2>Who makes it</h2>
+<p>{{ site_name }} is built by an independent developer in Karachi. Questions, ideas and bug reports are welcome on the <a href="{{ url_for('contact') }}">contact page</a>.</p>
+{% endblock %}

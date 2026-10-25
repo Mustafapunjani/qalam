@@ -1,0 +1,19 @@
+{% extends "page.html" %}
+{% block title %}Privacy policy | {{ site_name }}{% endblock %}
+{% block body %}
+<h1>Privacy policy</h1>
+<p class="muted">Last updated {{ updated }}</p>
+<h2>Text you type</h2>
+<p>The converter draws your pages inside your browser. The text you type, your settings and any font you upload are stored only in your browser’s local storage on your device, so they’re there next time. We never receive them. You can clear them by removing the font in the converter or clearing your browser’s site data.</p>
+<h2>Handwriting photos</h2>
+<p>When you make a font, your photos are sent to our server, processed in memory to build the font and then discarded. We don’t save the photos or the font on our server, and we don’t look at them.</p>
+<h2>Technical data</h2>
+<p>Like most websites, our hosting provider keeps standard server logs, such as IP address, browser type and the pages requested, for security and to keep the service running. We limit how often fonts can be made from one connection to prevent abuse.</p>
+<h2>Third-party services</h2>
+<p>The handwriting styles are loaded from Google Fonts, which receives your IP address when your browser downloads them.</p>
+<!-- When you add Google AdSense or analytics, update this section: they use cookies and you must say so. -->
+<h2>Children</h2>
+<p>{{ site_name }} doesn’t ask for names, emails or accounts, and doesn’t knowingly collect personal information from anyone.</p>
+<h2>Contact</h2>
+<p>Questions about privacy: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a></p>
+{% endblock %}
