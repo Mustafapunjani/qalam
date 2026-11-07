@@ -13,6 +13,29 @@
         <label class="field"><span>Date</span><input type="text" id="date" maxlength="40"></label>
       </div>
       <label class="field"><span>Text</span><textarea id="text" spellcheck="true"></textarea></label>
+      <details class="graph-tool" id="graphTool">
+        <summary>Add a graph</summary>
+        <label class="field"><span>Equations, one per line</span>
+          <textarea id="gEq" rows="3" spellcheck="false" placeholder="y = x^2 - 4&#10;y = 2x + 1"></textarea></label>
+        <label class="field"><span>Points (optional)</span>
+          <input type="text" id="gPts" spellcheck="false" placeholder="A(2, 0), B(-1, 3)"></label>
+        <div class="row2">
+          <label class="field"><span>x from</span><input type="text" id="gX0" value="-5" inputmode="decimal"></label>
+          <label class="field"><span>x to</span><input type="text" id="gX1" value="5" inputmode="decimal"></label>
+        </div>
+        <div class="row2">
+          <label class="field"><span>y from</span><input type="text" id="gY0" placeholder="auto" inputmode="decimal"></label>
+          <label class="field"><span>y to</span><input type="text" id="gY1" placeholder="auto" inputmode="decimal"></label>
+        </div>
+        <div class="chips" id="gSize" role="group" aria-label="Graph size">
+          <button type="button" class="chip" data-size="small" aria-pressed="false">Small</button>
+          <button type="button" class="chip" data-size="medium" aria-pressed="true">Medium</button>
+          <button type="button" class="chip" data-size="large" aria-pressed="false">Large</button>
+        </div>
+        <p class="graph-msg" id="gMsg" role="alert"></p>
+        <button type="button" class="btn primary" id="gInsert">Insert graph</button>
+        <p class="graph-hint">Use ^ for powers, and sqrt(x), sin(x), cos(x), tan(x), abs(x), ln(x), pi. The graph goes where your cursor is in the text, as a [graph] block you can edit later.</p>
+      </details>
     </div>
 
     <div class="group">
@@ -93,6 +116,7 @@
     <dl>
       <dt>Is it free?</dt><dd>Yes. There’s no sign-up and no watermark.</dd>
       <dt>Is my text sent anywhere?</dt><dd>No. Pages are drawn in your browser, and your text stays on your device.</dd>
+      <dt>Can I add math graphs?</dt><dd>Yes. Open “Add a graph” under the text box, or type a block like [graph: y = x^2 - 4; x from -3 to 3] on its own line. Graphs are drawn by hand like the rest of the page.</dd>
       <dt>Can I use my own font file?</dt><dd>Yes. Use “Upload font” in the handwriting list. Any .ttf, .otf, .woff or .woff2 file works.</dd>
     </dl>
   </div>
@@ -100,5 +124,6 @@
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/jspdf.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/graphs.js') }}"></script>
 <script src="{{ url_for('static', filename='js/converter.js') }}"></script>
 {% endblock %}
