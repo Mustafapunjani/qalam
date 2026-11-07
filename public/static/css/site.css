@@ -146,3 +146,15 @@ a.btn.primary{color:var(--accent-ink)}
 :root{--bad:#a3261d}
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){--bad:#ff9a8f} }
 :root[data-theme="dark"]{--bad:#ff9a8f}
+
+/* ---------- Graph tool ---------- */
+.graph-tool{border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--field)}
+.graph-tool summary{cursor:pointer;padding:9px 0;font-weight:600;font-size:14.5px;color:var(--accent)}
+.graph-tool[open]{padding-bottom:12px}
+.graph-tool[open] summary{margin-bottom:4px}
+.graph-tool textarea{min-height:78px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px}
+.graph-tool .chips{margin:2px 0 10px}
+.graph-tool .chip{padding:4px 12px;font-size:13.5px}
+.graph-msg{font-size:13px;color:var(--bad);margin:0 0 8px}
+.graph-msg:empty{display:none}
+.graph-hint{font-size:12.5px;color:var(--muted);margin:10px 0 0}
