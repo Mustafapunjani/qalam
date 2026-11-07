@@ -182,7 +182,7 @@ function makeEnv(st, scale){
   };
   const measureW = (t,size)=> measure(t,size) + ls*Math.max(0,t.length-1);
   const spaceW = size=> Math.max(measure(" ",size), size*0.26)*1.1 + ls;
-  return {st, scale, font, paperKey, paper, fs, ls, measure, measureW, spaceW,
+  return {st, scale, font, paperKey, paper, fs, ls, measure, measureW, spaceW, warnings: [],
           ink: INKS[st.ink] || INKS.blue, vari: st.vari/100, drift: st.drift/100};
 }
 
@@ -226,7 +226,22 @@ function layout(env){
   };
   const heading = (st.heading||"").trim();
   if(heading) wrap(heading.split(/\s+/).map(t=>({t})), fs*1.3, true);
-  for(const para of String(st.text||"").replace(/\r/g,"").split("\n")){
+  const blocks = window.QalamGraph
+    ? window.QalamGraph.splitBlocks(st.text)
+    : String(st.text||"").replace(/\r/g,"").split("\n").map(t=>({text:t}));
+  const GRAPH_PX = {small:280, medium:420, large:580};
+  let graphNo = 0;
+  for(const blk of blocks){
+    if(blk.graph){
+      graphNo++;
+      const rows = Math.min(ys.length, Math.max(4, Math.ceil(GRAPH_PX[blk.graph.size] / paper.gap)));
+      if(li + rows > ys.length) newPage();
+      cur.lines.push({words:[], graph:blk.graph, y:ys[li], yLast:ys[li+rows-1], size:fs});
+      li += rows;
+      blk.graph.errors.forEach(e=>env.warnings.push("Graph "+graphNo+": "+e));
+      continue;
+    }
+    const para = blk.text;
     if(!para.trim()){ push({words:[], size:fs}); continue; }
     const toks = [];
     for(const word of para.split(/\s+/).filter(Boolean)){
@@ -422,6 +437,7 @@ function drawPage(pg, idx, env, r){
     drawWord(c, date, x, xx=> y0 + sl*(xx-x), ds, env, r);
   }
   for(const line of pg.lines){
+    if(line.graph){ drawGraph(c, line, env, r); continue; }
     if(!line.words.length) continue;
     const slope = (r()-.5)*2*0.004*drift, amp = 2.4*drift*(line.size/40), ph = r()*6.283, fr = 150 + r()*80;
     let x = line.heading ? (paper.left+paper.right)/2 - line.width/2 : paper.left + r()*8*vari;
@@ -459,9 +475,220 @@ function drawPage(pg, idx, env, r){
   return side ? sideShadow(out, side, st.shadowAmt, ((st.seed|0) ^ 0x3c6ef372) + idx*7919) : out;
 }
 
+/* ---------- Graphs ---------- */
+function penPath(c, pts, env, r, width){
+  // A pen stroke through pts with a slight, smooth hand wobble
+  if(pts.length < 2) return;
+  const v = 0.35 + 1.1*env.vari, ph = r()*6.283, ph2 = r()*6.283, f1 = 0.018 + r()*0.015, f2 = 0.07 + r()*0.03;
+  let dist = 0;
+  c.save(); c.lineWidth = width; c.globalAlpha = env.ink.a*(0.9 + r()*0.1); c.beginPath();
+  for(let i=0; i<pts.length; i++){
+    const [x,y] = pts[i];
+    if(i) dist += Math.hypot(x - pts[i-1][0], y - pts[i-1][1]);
+    const a = pts[Math.max(0,i-1)], b = pts[Math.min(pts.length-1,i+1)];
+    const dx = b[0]-a[0], dy = b[1]-a[1], L = Math.hypot(dx,dy) || 1;
+    const off = v*(Math.sin(dist*f1 + ph)*0.8 + Math.sin(dist*f2 + ph2)*0.3);
+    const px = x - dy/L*off, py = y + dx/L*off;
+    if(i) c.lineTo(px,py); else c.moveTo(px,py);
+  }
+  c.stroke(); c.restore();
+}
+function penLine(c, x1, y1, x2, y2, env, r, width){
+  const n = Math.max(2, Math.ceil(Math.hypot(x2-x1, y2-y1)/8)), pts = [];
+  for(let i=0; i<=n; i++) pts.push([x1+(x2-x1)*i/n, y1+(y2-y1)*i/n]);
+  penPath(c, pts, env, r, width);
+}
+function mathRuns(text){
+  // "y = x^2 + 2^(x+1)" -> normal and raised (superscript) pieces
+  const runs = [], re = /\^(\([^)]*\)|-?[A-Za-z0-9.]+)/g;
+  let last = 0, m;
+  while((m = re.exec(text))){
+    if(m.index > last) runs.push({t:text.slice(last, m.index), sup:false});
+    runs.push({t:m[1].replace(/^\((.*)\)$/,"$1"), sup:true});
+    last = re.lastIndex;
+  }
+  if(last < text.length) runs.push({t:text.slice(last), sup:false});
+  return runs;
+}
+function mathWidth(text, size, env){
+  return mathRuns(text).reduce((w,run)=> w + env.measureW(run.t, run.sup ? size*0.62 : size) + (run.sup ? 2 : 0), 0);
+}
+function drawMath(c, text, x, y, size, env, r){
+  for(const run of mathRuns(text)){
+    const s = run.sup ? size*0.62 : size, yy = run.sup ? y - size*0.36 : y;
+    drawWord(c, run.t, x + (run.sup ? 1 : 0), ()=>yy, s, env, r);
+    x += env.measureW(run.t, s) + (run.sup ? 2 : 0);
+  }
+}
+function niceStep(span, maxTicks){
+  const raw = span / Math.max(1, maxTicks), p = Math.pow(10, Math.floor(Math.log10(raw)));
+  for(const m of [1,2,5,10]) if(m*p >= raw - 1e-12) return m*p;
+  return 10*p;
+}
+function fmtNum(v){
+  if(Math.abs(v) < 1e-9) return "0";
+  return String(parseFloat(v.toFixed(4)));
+}
+function graphRanges(g){
+  let xr = g.xr;
+  if(!xr){
+    xr = [-5, 5];
+    if(g.points.length){
+      const xs = g.points.map(p=>p.x).concat(g.vlines.map(v=>v.x));
+      const lo = Math.min(...xs, g.curves.length ? -5 : Infinity), hi = Math.max(...xs, g.curves.length ? 5 : -Infinity);
+      const pad = Math.max(1, (hi-lo)*0.15);
+      xr = [Math.floor(lo - pad), Math.ceil(hi + pad)];
+    }
+  }
+  let yr = g.yr;
+  if(!yr){
+    const vals = [];
+    for(const cv of g.curves) for(let i=0; i<=300; i++){
+      const y = cv.f(xr[0] + (xr[1]-xr[0])*i/300);
+      if(Number.isFinite(y)) vals.push(y);
+    }
+    vals.sort((a,b)=>a-b);
+    let lo = vals.length ? vals[Math.floor(vals.length*0.03)] : -5;
+    let hi = vals.length ? vals[Math.max(0, Math.ceil(vals.length*0.97)-1)] : 5;
+    for(const p of g.points){ lo = Math.min(lo, p.y); hi = Math.max(hi, p.y); }
+    if(hi - lo < 1e-9){ lo -= 1; hi += 1; }
+    const span = hi - lo;
+    if(lo > 0 && lo < span*0.6) lo = 0;          // show the x-axis when it's close
+    if(hi < 0 && -hi < span*0.6) hi = 0;
+    const pad = (hi - lo)*0.1;
+    yr = [lo - pad, hi + pad];
+  }
+  return {xr, yr};
+}
+function drawGraph(c, line, env, r){
+  const {paper, paperKey, fs} = env, g = line.graph;
+  if(!g.curves.length && !g.points.length && !g.vlines.length) return;
+  let {xr, yr} = graphRanges(g);
+  const top = line.y + 4, bottom = line.yLast - 6;   // leave room for the text line above
+  const textL = paper.left, textR = paper.right - 24;
+  let bh = bottom - top, bw = Math.min(textR - textL - 40, bh*1.5);
+  let bx = (textL + textR)/2 - bw/2, by = top;
+
+  if(paperKey === "graph"){                        // put axes and units on the printed grid
+    const cell = 30, gx = [Math.floor(xr[0]), Math.ceil(xr[1])], gy = [Math.floor(yr[0]), Math.ceil(yr[1])];
+    const ty = Math.ceil(top/cell)*cell;
+    const ux = Math.floor((textR - textL - 60)/(gx[1]-gx[0])/cell)*cell, uy = Math.floor((bottom-ty)/(gy[1]-gy[0])/cell)*cell;
+    if(ux >= cell && uy >= cell){
+      xr = gx; yr = gy; bw = ux*(gx[1]-gx[0]); bh = uy*(gy[1]-gy[0]);
+      bx = Math.round(((textL+textR)/2 - bw/2)/cell)*cell; by = ty;
+    }
+  }
+  const sx = x=> bx + (x - xr[0])/(xr[1]-xr[0])*bw;
+  const sy = y=> by + bh - (y - yr[0])/(yr[1]-yr[0])*bh;
+  const lw = Math.max(1.8, fs*0.05), ls = fs*0.58;
+  const inX = v=> v >= xr[0] && v <= xr[1], inY = v=> v >= yr[0] && v <= yr[1];
+  const axX = inX(0) ? 0 : (xr[0] > 0 ? xr[0] : xr[1]);
+  const axY = inY(0) ? 0 : (yr[0] > 0 ? yr[0] : yr[1]);
+  const ax = sx(axX), ay = sy(axY);
+
+  // Everything already drawn, so labels can avoid it
+  const placed = [], obst = [];
+  const addLine = (x1,y1,x2,y2)=>{ const n = Math.ceil(Math.hypot(x2-x1,y2-y1)/6); for(let i=0;i<=n;i++) obst.push([x1+(x2-x1)*i/n, y1+(y2-y1)*i/n]); };
+  const fits = (x,y,w,h)=> x >= bx-4 && x+w <= bx+bw+30 && y-h >= by-6 && y <= by+bh+4 &&
+    !placed.some(q=> x < q.x+q.w+6 && x+w+6 > q.x && y-h < q.y+4 && y+4 > q.y-q.h) &&
+    !obst.some(([px,py])=> px > x-4 && px < x+w+4 && py > y-h-4 && py < y+6);
+
+  // axes with arrowheads
+  const xTip = bx + bw + 16, yTip = by - 16, j = ()=> (r()-.5)*4;
+  penLine(c, bx - 8 + j(), ay, xTip, ay, env, r, lw);
+  penLine(c, xTip, ay, xTip - 13, ay - 6 + j()*0.5, env, r, lw);
+  penLine(c, xTip, ay, xTip - 13, ay + 6 + j()*0.5, env, r, lw);
+  penLine(c, ax, by + bh + 8 + j(), ax, yTip, env, r, lw);
+  penLine(c, ax, yTip, ax - 6 + j()*0.5, yTip + 13, env, r, lw);
+  penLine(c, ax, yTip, ax + 6 + j()*0.5, yTip + 13, env, r, lw);
+  addLine(bx - 8, ay, xTip, ay); addLine(ax, by + bh + 8, ax, yTip);
+  drawMath(c, "x", xTip + 6, ay + ls*0.35, fs*0.75, env, r);
+  drawMath(c, "y", ax + 10, yTip + fs*0.2, fs*0.75, env, r);
+
+  // ticks and numbers
+  const sxStep = niceStep(xr[1]-xr[0], Math.floor(bw/48)), syStep = niceStep(yr[1]-yr[0], Math.floor(bh/40));
+  for(let v = Math.ceil(xr[0]/sxStep - 1e-9)*sxStep; v <= xr[1] + 1e-9; v += sxStep){
+    if(Math.abs(v - axX) < sxStep*1e-6) continue;
+    const px = sx(v), t = fmtNum(v), w = mathWidth(t, ls, env);
+    penLine(c, px, ay - 6, px, ay + 6, env, r, lw*0.85);
+    const tx = px - w/2 - (v < 0 ? ls*0.15 : 0), tyy = ay + 8 + ls*0.95;
+    placed.push({x:tx, y:tyy, w, h:ls*0.8});
+    drawMath(c, t, tx, tyy, ls, env, r);
+  }
+  for(let v = Math.ceil(yr[0]/syStep - 1e-9)*syStep; v <= yr[1] + 1e-9; v += syStep){
+    if(Math.abs(v - axY) < syStep*1e-6) continue;
+    const py = sy(v), t = fmtNum(v), w = mathWidth(t, ls, env);
+    penLine(c, ax - 6, py, ax + 6, py, env, r, lw*0.85);
+    placed.push({x:ax - w - 12, y:py + ls*0.35, w, h:ls*0.8});
+    drawMath(c, t, ax - w - 12, py + ls*0.35, ls, env, r);
+  }
+  if(axX === 0 && axY === 0) drawMath(c, "O", ax - mathWidth("O", ls, env) - 10, ay + 8 + ls*0.95, ls, env, r);
+
+  // curves, clipped to the graph area and broken at gaps like 1/x or tan x
+  c.save(); c.beginPath(); c.rect(bx - 3, by - 3, bw + 6, bh + 6); c.clip();
+  const curvePaths = [];
+  for(const cv of g.curves){
+    const N = Math.ceil(bw/3); let seg = [], prev = null;
+    const flush = ()=>{ if(seg.length > 1) penPath(c, seg, env, r, lw*1.15); seg = []; };
+    for(let i=0; i<=N; i++){
+      const x = xr[0] + (xr[1]-xr[0])*i/N, y = cv.f(x);
+      if(!Number.isFinite(y) || Math.abs(y) > 1e7){ flush(); prev = null; continue; }
+      const py = sy(y);
+      if(prev !== null && Math.abs(py - prev) > bh*0.8) flush();
+      seg.push([sx(x), Math.max(by - bh, Math.min(by + 2*bh, py))]);
+      if(i % 2 === 0 && py >= by - 4 && py <= by + bh + 4) obst.push([sx(x), py]);
+      prev = py;
+    }
+    flush();
+    curvePaths.push(cv);
+  }
+  for(const vl of g.vlines) if(inX(vl.x)){ penLine(c, sx(vl.x), by, sx(vl.x), by + bh, env, r, lw*1.1); addLine(sx(vl.x), by, sx(vl.x), by + bh); }
+  c.restore();
+
+  // points
+  for(const p of g.points){
+    if(!inX(p.x) || !inY(p.y)) continue;
+    const px = sx(p.x), py = sy(p.y);
+    c.save(); c.globalAlpha = env.ink.a; c.beginPath(); c.arc(px + (r()-.5), py + (r()-.5), Math.max(3.2, fs*0.085), 0, 6.2832); c.fill(); c.restore();
+    const t = p.name + "(" + fmtNum(p.x) + ", " + fmtNum(p.y) + ")", w = mathWidth(t, ls, env);
+    const opts = [[px + 9, py - 9], [px - w - 9, py - 9], [px + 9, py + ls + 6], [px - w - 9, py + ls + 6]];
+    const at = opts.find(o=>fits(o[0], o[1], w, ls)) || opts[0];
+    placed.push({x:at[0], y:at[1], w, h:ls});
+    drawMath(c, t, at[0], at[1], ls, env, r);
+  }
+
+  // labels for curves and vertical lines
+  const lsz = fs*0.68;
+  for(const cv of curvePaths){
+    const w = mathWidth(cv.label, lsz, env);
+    let spot = null;
+    for(const fr of [0.86, 0.78, 0.92, 0.7, 0.62, 0.55, 0.45, 0.35, 0.25, 0.15, 0.08]){
+      const x = xr[0] + (xr[1]-xr[0])*fr, y = cv.f(x);
+      if(!Number.isFinite(y) || !inY(y)) continue;
+      const px = sx(x), py = sy(y);
+      for(const [lx, ly] of [[px + 10, py - 10], [px - w - 10, py - 10], [px + 10, py + lsz + 10], [px - w - 10, py + lsz + 10], [px + 16, py - 22], [px - w - 16, py + lsz + 22]]){
+        if(fits(lx, ly, w, lsz)){ spot = [lx, ly]; break; }
+      }
+      if(spot) break;
+    }
+    if(!spot) spot = [bx + bw - w, by + lsz];
+    placed.push({x:spot[0], y:spot[1], w, h:lsz});
+    drawMath(c, cv.label, spot[0], spot[1], lsz, env, r);
+  }
+  for(const vl of g.vlines){
+    if(!inX(vl.x)) continue;
+    const w = mathWidth(vl.label, lsz, env), px = sx(vl.x);
+    const at = [[px + 8, by + lsz], [px - w - 8, by + lsz], [px + 8, by + bh - 4], [px - w - 8, by + bh - 4]].find(o=>fits(o[0], o[1], w, lsz)) || [px + 8, by + lsz];
+    placed.push({x:at[0], y:at[1], w, h:lsz});
+    drawMath(c, vl.label, at[0], at[1], lsz, env, r);
+  }
+}
+
+let lastWarnings = [], graphStatus = false;
 function buildPages(st, scale){
   const env = makeEnv(st, scale);
   const pages = layout(env);
+  lastWarnings = env.warnings;
   const r = rngFrom(st.seed);
   return pages.map((pg,i)=> drawPage(pg, i, env, r));
 }
@@ -579,7 +806,7 @@ async function render(){
   await ensureFont();
   if(t !== token) return;
   let env, pages;
-  try{ env = makeEnv(state, previewScale()); pages = layout(env); }
+  try{ env = makeEnv(state, previewScale()); pages = layout(env); lastWarnings = env.warnings; }
   catch(e){ setStatus("The preview couldn’t be drawn. Try a different handwriting style."); return; }
   const r = rngFrom(state.seed), n = pages.length;
   if(endEl) endEl.remove();
@@ -599,6 +826,8 @@ async function render(){
   pageCount = n;
   countEl.textContent = n === 1 ? "1 page" : n+" pages";
   pdfBtn.textContent = pdfLabel();
+  if(lastWarnings.length){ setStatus(lastWarnings.join(" ")); graphStatus = true; }
+  else if(graphStatus){ setStatus(""); graphStatus = false; }
   if(n > 1){
     // a second download button under the last page, so nobody has to scroll back up
     endEl = document.createElement("div"); endEl.className = "pages-end";
@@ -649,6 +878,48 @@ async function savePdf(){
   }catch(e){ saveError(e); }
   finally{ btns.forEach(b=>b.disabled = false); }
 }
+
+/* ---------- Add a graph form ---------- */
+let graphSize = "medium", lastCaret = null;
+["click","keyup","select","input"].forEach(ev=>$("text").addEventListener(ev, ()=>{ lastCaret = $("text").selectionEnd; }));
+document.querySelectorAll("#gSize .chip").forEach(b=>b.addEventListener("click", ()=>{
+  graphSize = b.dataset.size;
+  document.querySelectorAll("#gSize .chip").forEach(x=>x.setAttribute("aria-pressed", String(x===b)));
+}));
+$("gInsert").addEventListener("click", ()=>{
+  const msg = $("gMsg"), num = v=> v.trim()==="" ? null : Number(v.replace(/[−–]/g,"-"));
+  const eqs = $("gEq").value.split("\n").map(t=>t.trim()).filter(Boolean);
+  const pts = $("gPts").value.trim();
+  const x0 = num($("gX0").value), x1 = num($("gX1").value), y0 = num($("gY0").value), y1 = num($("gY1").value);
+  if(!eqs.length && !pts){ msg.textContent = "Add at least one equation or point."; return; }
+  for(const [a,b,name] of [[x0,x1,"x"],[y0,y1,"y"]]){
+    if((a===null) !== (b===null)){ msg.textContent = "Fill in both "+name+" values, or leave both empty."; return; }
+    if(a!==null && (!Number.isFinite(a) || !Number.isFinite(b) || a===b)){ msg.textContent = "The "+name+" range needs two different numbers."; return; }
+  }
+  const lines = eqs.slice();
+  if(pts) lines.push(pts);
+  if(x0!==null) lines.push("x from "+Math.min(x0,x1)+" to "+Math.max(x0,x1));
+  if(y0!==null) lines.push("y from "+Math.min(y0,y1)+" to "+Math.max(y0,y1));
+  if(graphSize !== "medium") lines.push("size "+graphSize);
+  const check = window.QalamGraph.parseBlock(lines);
+  if(check.errors.length){ msg.textContent = check.errors[0]; return; }
+  msg.textContent = "";
+  const block = "[graph]\n" + lines.join("\n") + "\n[/graph]";
+  const ta = $("text"), v = ta.value;
+  const at = lastCaret === null ? v.length : Math.min(lastCaret, v.length);   // end of text unless they clicked into it
+  let start = v.slice(0, at), end = v.slice(at);
+  // keep the block on its own lines: finish the current line first
+  const nl = end.indexOf("\n");
+  if(start && !start.endsWith("\n") && nl !== -1 && nl > 0){ start += end.slice(0, nl); end = end.slice(nl); }
+  else if(start && !start.endsWith("\n") && nl === -1){ start += end; end = ""; }
+  const before = start && !start.endsWith("\n") ? "\n" : "";
+  const after = end.startsWith("\n") ? "" : "\n";
+  ta.value = start + before + block + after + end;
+  state.text = ta.value; changed(true);
+  const pos = (start + before + block).length;
+  ta.focus(); ta.setSelectionRange(pos, pos); lastCaret = pos;
+  $("gEq").value = ""; $("gPts").value = "";
+});
 
 $("shuffle").addEventListener("click", ()=>{ state.seed = Math.floor(Math.random()*2147483647); changed(true); });
 pdfBtn.addEventListener("click", savePdf);
